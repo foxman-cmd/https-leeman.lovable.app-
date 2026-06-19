@@ -13,3 +13,4 @@ Quick start
 
 Notes
 - This is a minimal scaffold: implement secure credentials and paper/live execution adapters before any live trading.
+- For higher-frequency signals (multiple per day), fetch intraday data using `fetch_prices(..., interval='5m'|'15m'|'1m')` and pick shorter rolling windows in `scan_universe`.

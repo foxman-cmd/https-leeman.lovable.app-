@@ -1,16 +1,11 @@
 """Starter scanner: simple momentum crossover with macro regime adjustment.
 
 This file was extended to support intraday signals and an adjustable threshold calibration
-so the scanner can produce a configurable minimum average signals per day (e.g., >5).
+so the scanner can produce a configurable minimum average signals per day (e.g., >N).
 
-Usage:
-- Provide intraday price DataFrame (e.g., 5m bars) via fetch_prices(..., interval='5m').
-- Call scan_universe(..., window_short=3, window_long=12, target_min_signals_per_day=10)
-
-The scanner computes a short and long moving average, converts the momentum to a z-score,
-and emits signals when |zscore| > threshold. If `target_min_signals_per_day` is set,
-we calibrate the threshold (lower it) until the average signals/day meets the target
-or a minimum threshold is reached.
+You asked to "send even at 60 confidence": to support this, the calibration minimum
+threshold default has been adjusted and you can directly pass threshold=0.6 to emit
+signals at z-score >= 0.6.
 """
 
 import pandas as pd
@@ -64,8 +59,11 @@ def _avg_signals_per_day(signals: pd.DataFrame):
     return daily_counts.mean()
 
 
-def calibrate_threshold(momentum_z: pd.DataFrame, target_min_signals_per_day: int, initial_threshold: float = 1.0, min_threshold: float = 0.3, step: float = 0.05):
-    """Lower the threshold until the average signals/day >= target or min_threshold reached."""
+def calibrate_threshold(momentum_z: pd.DataFrame, target_min_signals_per_day: int, initial_threshold: float = 1.0, min_threshold: float = 0.6, step: float = 0.05):
+    """Lower the threshold until the average signals/day >= target or min_threshold reached.
+
+    NOTE: min_threshold default changed to 0.6 to allow "send at 60 confidence" behavior.
+    """
     thr = initial_threshold
     while thr >= min_threshold:
         s = _signals_from_z(momentum_z, thr)
@@ -78,7 +76,7 @@ def calibrate_threshold(momentum_z: pd.DataFrame, target_min_signals_per_day: in
 
 
 def scan_universe(price_df: pd.DataFrame, macro_df: pd.DataFrame = None, window_short: int = 3, window_long: int = 12,
-                  zscore_window: int = 252, threshold: float = 1.0, target_min_signals_per_day: int = None):
+                  zscore_window: int = 252, threshold: float = 1.0, target_min_signals_per_day: int = None, min_threshold: float = 0.6):
     """
     price_df: DataFrame with columns = tickers, index = datetime (close prices), can be intraday
     macro_df: DataFrame with macro series aligned to same index (or resampled)
@@ -86,6 +84,7 @@ def scan_universe(price_df: pd.DataFrame, macro_df: pd.DataFrame = None, window_
     zscore_window: window for z-score normalization (in periods). If intraday, pick shorter window (e.g., 1000)
     threshold: initial zscore threshold for signals
     target_min_signals_per_day: if set, the scanner will lower `threshold` until average signals/day >= target
+    min_threshold: the lower bound of threshold reduction. Default 0.6 (60% confidence)
 
     returns: signals DataFrame with floats in {-1,0,1}
     """
@@ -101,7 +100,7 @@ def scan_universe(price_df: pd.DataFrame, macro_df: pd.DataFrame = None, window_
 
     # If calibration requested, find threshold
     if target_min_signals_per_day is not None:
-        chosen_threshold, signals = calibrate_threshold(momentum_z, target_min_signals_per_day, initial_threshold=threshold)
+        chosen_threshold, signals = calibrate_threshold(momentum_z, target_min_signals_per_day, initial_threshold=threshold, min_threshold=min_threshold)
     else:
         chosen_threshold = threshold
         signals = _signals_from_z(momentum_z.fillna(0.0), threshold=chosen_threshold)
@@ -130,7 +129,8 @@ if __name__ == '__main__':
         prices = fetch_prices('SPY', interval='5m', period='7d')  # 5-minute bars
         # synthetic macro: assume risk-on
         macro = None
-        sig = scan_universe(prices, macro, window_short=3, window_long=12, zscore_window=200, threshold=1.0, target_min_signals_per_day=10)
+        # Aim for 10 signals/day but allow lowering threshold down to 0.6 (60% confidence)
+        sig = scan_universe(prices, macro, window_short=3, window_long=12, zscore_window=200, threshold=1.0, target_min_signals_per_day=10, min_threshold=0.6)
         print('Average signals/day:', _avg_signals_per_day(sig))
         print(sig.tail(20))
     else:
